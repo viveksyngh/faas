@@ -63,6 +63,13 @@ type Function struct {
 	// Labels are metadata for functions which may be used by the
 	// back-end for making scheduling or routing decisions
 	Labels *map[string]string `json:"labels"`
+
+	//InvocationCount2XX Number of 2XX response
+	InvocationCount2XX float64 `json:"invocationCount2XX"`
+	//InvocationCountNon2XX Number of non-2XX response
+	InvocationCountNon2XX float64 `json:"invocationCountNon2XX"`
+	//AverageResponseTime Average response time of requests
+	AverageResponseTime float64 `json:"averageResponeTime"`
 }
 
 // AsyncReport is the report from a function executed on a queue worker.

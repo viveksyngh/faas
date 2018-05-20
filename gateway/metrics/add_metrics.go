@@ -62,13 +62,38 @@ func AddMetricsHandler(handler http.HandlerFunc, prometheusQuery PrometheusQuery
 		results, fetchErr := prometheusQuery.Fetch(expr)
 		if fetchErr != nil {
 			log.Printf("Error querying Prometheus API: %s\n", fetchErr.Error())
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(upstreamBody)
+			writeResponse(w, upstreamBody)
 			return
 		}
 
-		mixIn(&functions, results)
+		invocationCount2XXExpr := url.QueryEscape(`sum(gateway_function_invocation_total {function_name=~".*", code=~"2.*"}) by (function_name)`)
+		invocationCount2XXResults, fetchErr := prometheusQuery.Fetch(invocationCount2XXExpr)
+
+		if fetchErr != nil {
+			log.Printf("Error querying Prometheus API: %s\n", fetchErr.Error())
+			writeResponse(w, upstreamBody)
+			return
+		}
+
+		invocationCountNon2XXExpr := url.QueryEscape(`sum(gateway_function_invocation_total {function_name=~".*", code!~"2.*"}) by (function_name)`)
+		invocationCountNon2XXResults, fetchErr := prometheusQuery.Fetch(invocationCountNon2XXExpr)
+
+		if fetchErr != nil {
+			log.Printf("Error querying Prometheus API: %s\n", fetchErr.Error())
+			writeResponse(w, upstreamBody)
+			return
+		}
+
+		averageResponseTimeExpr := url.QueryEscape(`avg(gateway_functions_seconds_sum/gateway_functions_seconds_count {function_name=~".*"}) by (function_name)`)
+		averageResponseTimeResults, fetchErr := prometheusQuery.Fetch(averageResponseTimeExpr)
+
+		if fetchErr != nil {
+			log.Printf("Error querying Prometheus API: %s\n", fetchErr.Error())
+			writeResponse(w, upstreamBody)
+			return
+		}
+
+		mixIn(&functions, results, invocationCount2XXResults, invocationCountNon2XXResults, averageResponseTimeResults)
 
 		bytesOut, marshalErr := json.Marshal(functions)
 		if marshalErr != nil {
@@ -83,7 +108,7 @@ func AddMetricsHandler(handler http.HandlerFunc, prometheusQuery PrometheusQuery
 	}
 }
 
-func mixIn(functions *[]requests.Function, metrics *VectorQueryResponse) {
+func mixIn(functions *[]requests.Function, invocationCountMetrics, invocationCount2XXMetrics, invocationCountNon2XXMetrics, averageResponseTimeMetrics *VectorQueryResponse) {
 	if functions == nil {
 		return
 	}
@@ -91,25 +116,74 @@ func mixIn(functions *[]requests.Function, metrics *VectorQueryResponse) {
 	// Ensure values are empty first.
 	for i := range *functions {
 		(*functions)[i].InvocationCount = 0
+		(*functions)[i].InvocationCount2XX = 0
+		(*functions)[i].InvocationCountNon2XX = 0
+		(*functions)[i].AverageResponseTime = 0
+
 	}
 
 	for i, function := range *functions {
-		for _, v := range metrics.Data.Result {
+
+		for _, v := range invocationCountMetrics.Data.Result {
 
 			if v.Metric.FunctionName == function.Name {
-				metricValue := v.Value[1]
-				switch metricValue.(type) {
-				case string:
-					// log.Println("String")
-					f, strconvErr := strconv.ParseFloat(metricValue.(string), 64)
-					if strconvErr != nil {
-						log.Printf("Unable to convert value for metric: %s\n", strconvErr)
-						continue
+				parsedValue, err := parseMetricValue(v.Value[1])
+				if err == nil {
+					(*functions)[i].InvocationCount += parsedValue
+				}
+			}
+		}
+
+		for _, v := range invocationCount2XXMetrics.Data.Result {
+
+			if v.Metric.FunctionName == function.Name {
+				parsedValue, err := parseMetricValue(v.Value[1])
+				if err == nil {
+					(*functions)[i].InvocationCount2XX += parsedValue
+				}
+			}
+		}
+
+		for _, v := range invocationCountNon2XXMetrics.Data.Result {
+
+			if v.Metric.FunctionName == function.Name {
+				if v.Metric.FunctionName == function.Name {
+					parsedValue, err := parseMetricValue(v.Value[1])
+					if err == nil {
+						(*functions)[i].InvocationCountNon2XX += parsedValue
 					}
-					(*functions)[i].InvocationCount += f
-					break
+				}
+			}
+		}
+
+		for _, v := range averageResponseTimeMetrics.Data.Result {
+
+			if v.Metric.FunctionName == function.Name {
+				if v.Metric.FunctionName == function.Name {
+					parsedValue, err := parseMetricValue(v.Value[1])
+					if err == nil {
+						(*functions)[i].AverageResponseTime += parsedValue
+					}
 				}
 			}
 		}
 	}
+}
+
+func writeResponse(w http.ResponseWriter, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
+}
+
+func parseMetricValue(metricValue interface{}) (parsedValue float64, err error) {
+	switch metricValue.(type) {
+	case string:
+		parsedValue, err = strconv.ParseFloat(metricValue.(string), 64)
+		if err != nil {
+			log.Printf("Unable to convert value for metric: %s\n", err)
+		}
+		break
+	}
+	return parsedValue, err
 }
