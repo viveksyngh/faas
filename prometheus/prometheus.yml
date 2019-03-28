@@ -35,6 +35,14 @@ scrape_configs:
         port: 8082
         type: A
         refresh_interval: 5s
+  
+  - job_name: "cadvisor"
+    scrape_interval: 5s
+    dns_sd_configs:
+      - names: ['tasks.cadvisor']
+        port: 8080
+        type: A
+        refresh_interval: 5s
 
 alerting:
   alertmanagers:

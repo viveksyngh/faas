@@ -177,6 +177,16 @@ services:
               target: /alertmanager.yml
         secrets:
             - basic-auth-password
+    
+    cadvisor:
+        image: google/cadvisor:latest
+        networks:
+            - functions
+        volumes:
+            - /:/rootfs:ro
+            - /var/run:/var/run:rw
+            - /sys:/sys:ro
+            - /var/lib/docker/:/var/lib/docker:ro
 
 configs:
     prometheus_config:
